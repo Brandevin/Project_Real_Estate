@@ -9,6 +9,11 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 library(plyr)
 library(data.table)
+library(hash)
+library(ggplot2)
+library(lattice)
+library(grid)
+library(gridExtra)
 ```
 
 ## Introduction to the problem
@@ -22,12 +27,50 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r importing_dataset}
-test=read.csv('./Inputs/test.csv')
-summary(test)
+train=read.csv('./Inputs/train.csv')
+summary(train)
 ```
 ```{r structure}
-str(test)
+str(train)
 ```
+```{r pressure, echo=FALSE}
+continous_vars<-c()
+discrete_vars<-c()
+for (col in names(train)){
+                if (nrow(unique(train[col]))>26){
+                                continous_vars<-c(continous_vars,col)
+                }
+                else {
+                                discrete_vars<-c(discrete_vars,col)
+                }
+}
+#Scatterplots - continous
+
+for (col in continous_vars){
+                train_filter<-train[!is.na(train[col]),]
+plot<-ggplot(train_filter,aes_string(x=col,y=train_filter$SalePrice))+geom_point()+ggtitle(col)
+ggsave(plot,file=paste0("./plots/",col,".png"),width=14,height=10,units="cm")
+}
+
+#Boxplots - discrete
+
+for (col in discrete_vars){
+                train_filter<-train[!is.na(train[col]),]
+                train_filter$col_factor<-factor(x=train_filter[[col]],levels=sort(unique(train_filter[[col]])),
+                                            labels=as.character(sort(unique(train_filter[[col]]))))
+                #train_filter[col]<-as.character(train_filter[col])
+plot<-ggplot(train_filter,aes_string(x=train_filter$col_factor,y=train_filter$SalePrice))+geom_boxplot()+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggsave(plot,file=paste0("./plots/",col,".png"),width=14,height=10,units="cm")
+}
+
+plot_grob<-arrangeGrob(grobs=plot_list)
+pdf('Scatterplot_1_var.pdf')
+grid.arrange(plot_grob)
+dev.off
+#Scatterplots - continous+discrete
+
+```
+
 ## Including Plots
 
 You can also embed plots, for example:
