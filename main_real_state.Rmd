@@ -14,6 +14,10 @@ library(ggplot2)
 library(lattice)
 library(grid)
 library(gridExtra)
+library(dplyr)
+library(ggpubr)
+library(scales)
+library(tidyr)
 ```
 
 ## Introduction to the problem
@@ -28,11 +32,8 @@ When you click the **Knit** button a document will be generated that includes bo
 
 ```{r importing_dataset}
 train=read.csv('./Inputs/train.csv')
-summary(train)
 ```
-```{r structure}
-str(train)
-```
+
 ```{r pressure, echo=FALSE}
 continous_vars<-c()
 discrete_vars<-c()
@@ -44,39 +45,168 @@ for (col in names(train)){
                                 discrete_vars<-c(discrete_vars,col)
                 }
 }
-#Scatterplots - continous
 
-for (col in continous_vars){
-                train_filter<-train[!is.na(train[col]),]
-plot<-ggplot(train_filter,aes_string(x=col,y=train_filter$SalePrice))+geom_point()+ggtitle(col)
-ggsave(plot,file=paste0("./plots/",col,".png"),width=14,height=10,units="cm")
+#Replacing cells without value with their meaning, when possible
+train$Alley<-train$Alley %>% replace_na("No Alley")
+train$BsmtExposure<-train$BsmtExposure %>% replace_na("NA")
+train$BsmtFinType1<-train$BsmtFinType1 %>% replace_na("No basement")
+train$BsmtCond<-train$BsmtCond %>% replace_na(0)
+train$BsmtQual<-train$BsmtQual %>% replace_na(0)
+train$Fence<-train$Fence %>% replace_na("No fence")
+train$FireplaceQu<-train$FireplaceQu %>% replace_na(0)
+train$GarageCond<-train$GarageCond %>% replace_na(0)
+train$GarageFinish<-train$GarageFinish %>% replace_na("No garage")
+train$GarageQual<-train$GarageQual %>% replace_na(0)
+train$GarageType<-train$GarageType %>% replace_na("No garage")
+train$GarageYrBlt<-train$GarageYrBlt %>% replace_na(mean(train$GarageYrBlt,na.rm=TRUE))
+train$LotFrontage<-train$LotFrontage %>% replace_na(0)
+train$MasVnrArea<-train$MasVnrArea %>% replace_na(0)
+train$MasVnrType<-train$MasVnrType %>% replace_na('None')
+train$Electrical<-train$Electrical %>% replace_na('Other')
+
+#Dropping features that dont have enough variables with different values, to avoid overfitting.
+train<-train %>% select(-c(RoofMatl,BsmtFinType2,BsmtFinSF2,Heating,KitchenAbvGr,EnclosedPorch,ScreenPorch,PoolArea,MiscFeature,PoolQC,MiscVal,Street,Utilities))
+
+#Substituting Categories by categories that, although less descriptive, are able to generalize more, as there are more samples per category
+train$BedroomAbvGr<-ifelse(train$BedroomAbvGr<1,1,ifelse(train$BedroomAbvGr>5,5,train$BedroomAbvGr))
+train$TotRmsAbvGrd<-ifelse(train$TotRmsAbvGrd<4,4,ifelse(train$TotRmsAbvGrd>10,10,train$TotRmsAbvGrd))
+train$Fireplaces<-ifelse(train$Fireplaces>2,2,train$Fireplaces)
+
+
+train$LotShape <- mapvalues(train$LotShape, from=c("IR1", "IR2", "IR3","Reg"), to=c("IR1", "IR2&IR3","IR2&IR3", "Reg"))
+train$MSSubClass <- mapvalues(train$MSSubClass, from=c(20,30,40,45,50,60,70,75,80,85,90,120,150,160,180,190), to=c("20","30","Other","Other","50","60","70","70","80","80","90","120","Other","160","Other","190"),warn_missing=FALSE)
+
+
+train$LotConfig <- mapvalues(train$LotConfig, from=c("Corner","CulDSac","FR2","FR3","Inside"), to=c("Corner","CulDSac","FR2&FR3","FR2&FR3","Inside"))
+
+train$Neighborhood <- mapvalues(train$Neighborhood, from=c("Blueste","NPkVill","Veenker"), to=c("Other","Other","Other"))
+
+train$BsmtExposure <- ifelse(train$BsmtExposure=="Gd","Good",train$BsmtExposure)
+
+train$RoofStyle <- ifelse(train$RoofStyle=="Gable","Gable",ifelse(train$RoofStyle=="Hip","Hip","Other"))
+train$LandSlope <- ifelse(train$LandSlope=="Gtl","Gtl","Other")
+train$Foundation <- ifelse(train$Foundation=="Stone","Other",ifelse(train$Foundation=="Wood","Other",ifelse(train$Foundation=="Slabt","Other",train$Foundation)))
+train$MSZoning <- ifelse(train$MSZoning=="FV","FV",ifelse(train$MSZoning=="RM","RM",ifelse(train$MSZoning=="RL","RL","Other")))
+
+train$Electrical <- ifelse(train$Electrical=="SBrkr","SBrkr",ifelse(train$Electrical=="FuseA","FuseA","Other"))
+train$Functional <- ifelse(train$Functional=="Typ","Typ","Other")
+
+train$GarageType <- ifelse(train$GarageType=="Attchd","Attchd",ifelse(train$GarageType=="BuiltIn","BuiltIn",ifelse(train$GarageType=="Detchd","Detchd","Other")))
+
+train$SaleType <- ifelse(train$SaleType=="WD","WD",ifelse(train$SaleType=="New","New",ifelse(train$SaleType=="COD","COD","Other")))
+train$SaleCondition <- ifelse(train$SaleCondition=="Normal","Normal",ifelse(train$SaleCondition=="Partial","Abnormal","Other"))
+train$HouseStyle <- ifelse(train$HouseStyle=="1Story","1Story",ifelse(train$HouseStyle=="1.5Fin","1.5Fin",ifelse(train$HouseStyle=="2Story","2Story",ifelse(train$HouseStyle=="SFoyer","SFoyer",ifelse(train$HouseStyle=="SLvl","SLvl","Other")))))
+
+
+
+train$Exterior1st <- ifelse(train$Exterior1st=="HdBoard","HdBoard",ifelse(train$Exterior1st=="MetalSd","MetalSd",ifelse(train$Exterior1st=="VinylSd","VinylSd",ifelse(train$Exterior1st=="Wd Sdng","Wd Sdng",ifelse(train$Exterior1st=="CemntBd","CemntBd",ifelse(train$Exterior1st=="BrkFace","BrkFace",ifelse(train$Exterior1st=="WdShing","WdShing","Other")))))))
+train$Exterior2nd <- ifelse(train$Exterior2nd=="HdBoard","HdBoard",ifelse(train$Exterior2nd=="MetalSd","MetalSd",ifelse(train$Exterior2nd=="VinylSd","VinylSd",ifelse(train$Exterior2nd=="Wd Sdng","Wd Sdng",ifelse(train$Exterior2nd=="CemntBd","CemntBd",ifelse(train$Exterior2nd=="BrkFace","BrkFace",ifelse(train$Exterior1st=="WdShing","WdShing","Other")))))))
+
+train$BsmtFullBath[train$BsmtFullBath > 0 ] <- 1
+train$BsmtHalfBath[train$BsmtHalfBath > 0 ] <- 1
+train$FullBath[train$FullBath == 0 ] <- 1
+train$BsmtHa[train$HalfBath > 1 ] <- 1
+train$GarageCars[train$GarageCars > 3 ] <- 3
+
+
+
+#Create new variables with Condition
+train$Condition<-ifelse(train$Condition1=="Artery" | train$Condition2=="Artery","Artery",ifelse(train$Condition1=="Feedr"|train$Condition2=="Feedr","Feedr","Other"))
+
+
+train$Ext_matl_cementbd<-ifelse(train$Exterior1st=="CemntBd" | train$Exterior2nd=="CemntBd",1,0)
+train$Ext_matl_brkface<-ifelse(train$Exterior1st=="BrkFace" | train$Exterior2nd=="BrkFace",1,0)
+train$Ext_matl_hdboard<-ifelse(train$Exterior1st=="HdBoard" | train$Exterior2nd=="HdBoard",1,0)
+train$Ext_matl_metalsd<-ifelse(train$Exterior1st=="MetalSd" | train$Exterior2nd=="MetalSd",1,0)
+train$Ext_matl_vinylsd<-ifelse(train$Exterior1st=="VinylSd" | train$Exterior2nd=="VinylSd",1,0)
+train$Ext_matl_wdsdng<-ifelse(train$Exterior1st=="Wd Sdng" | train$Exterior2nd=="Wd Sdng",1,0)
+train$Ext_matl_wdshing<-ifelse(train$Exterior1st=="WdShing" | train$Exterior2nd=="WdShing",1,0)
+
+#Replace ratings by rating number
+
+train[train=="Ex"]<-10
+train[train=="Gd"]<-8
+train[train=="TA"]<-6
+train[train=="Fa"]<-4
+train[train=="Po"]<-2
+
+
+#Creating new variables when area is equal to 0
+
+train$HasLot<-train$LotFrontage>0
+train$Has2ndFlr<-train$X2ndFlrSF>0
+train$HasPorch<-train$X3SsnPorch>0
+train$HaslowQuality_finished<-train$LowQualFinSF>0
+train$HasOpenPorch<-train$OpenPorchSF>0
+
+#
+train<-train %>% select(-c(Condition1,Condition2,Exterior1st,Exterior2nd,X3SsnPorch,LowQualFinSF))
+
+
+# Trim Outliers
+columns<-c("LotFrontage","LotArea","MasVnrArea","BsmtFinSF1","BsmtUnfSF","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","GrLivArea","GarageArea","WoodDeckSF","OpenPorchSF")
+for (col in columns){
+  quant96<-quantile(train[[col]],0.96,na.rm=TRUE)
+  train[[col]][train[[col]] > quant96 ] <- quant96
 }
+columns_lower<-c("GrLivArea","LotArea","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","YearBuilt","WoodDeckSF")
+for (col in columns_lower){
+  quant4<-quantile(train[train[[col]]>0,col],0.04,na.rm=TRUE)
+  train[[col]][train[[col]] < quant4 ] <- quant4
+}
+#Substituting 0s by the minimum value
+train$GarageArea[train$GarageArea==0] <-min(train[train$GarageArea>0,"GarageArea"])
+train$LotFrontage[train$LotFrontage==0] <-min(train[train$LotFrontage>0,"LotFrontage"])
+train$LotFrontage[train$TotalBsmtSF==0] <-min(train[train$TotalBsmtSF>0,"TotalBsmtSF"])
+train$LotFrontage[train$X1stFlrSF==0] <-min(train[train$X1stFlrSF>0,"X1stFlrSF"])
+train$X2ndFlrSF[train$X2ndFlrSF==0] <-min(train[train$X2ndFlrSF>0,"X2ndFlrSF"])
+train$WoodDeckSF[train$WoodDeckSF==0] <-min(train[train$WoodDeckSF>0,"WoodDeckSF"])
 
-#Boxplots - discrete
 
-for (col in discrete_vars){
+
+#plots
+
+for (col in names(train)){
+                number_nan<-sum(is.na(train[[col]]))
                 train_filter<-train[!is.na(train[col]),]
-                train_filter$col_factor<-factor(x=train_filter[[col]],levels=sort(unique(train_filter[[col]])),
+                train_filter<-train_filter[order(as.numeric(as.character(train_filter[[col]]))),]
+                if (col %in% continous_vars){
+plot1<-ggplot(train_filter,aes_string(x=col,y=train_filter$SalePrice))+geom_point()+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  xlab(col) + ylab("SalePrice")+
+     scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))
+                }
+                else {
+                           train_filter$col_factor<-factor(x=train_filter[[col]],levels=sort(unique(train_filter[[col]])),
                                             labels=as.character(sort(unique(train_filter[[col]]))))
-                #train_filter[col]<-as.character(train_filter[col])
-plot<-ggplot(train_filter,aes_string(x=train_filter$col_factor,y=train_filter$SalePrice))+geom_boxplot()+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-ggsave(plot,file=paste0("./plots/",col,".png"),width=14,height=10,units="cm")
+plot1<-ggplot(train_filter,aes_string(x=train_filter$col_factor,y=train_filter$SalePrice))+geom_boxplot()+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  xlab(col) + ylab("SalePrice")+
+     scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))
+                }
+                train_grouped<-as.data.frame(table(train[col]))
+plot2<-ggplot(train_grouped,aes(x=Var1,y=Freq))+geom_bar(stat="identity")+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  geom_text(aes(label = Freq, x = Var1, y = Freq), position = position_dodge(width = 0.8), vjust = -0.6)+ylim(0, max(train_grouped$Freq)*1.2) +
+  xlab(col) + ylab("Frequency")
+
+figure <- ggarrange(plot1, plot2,
+                    ncol = 1, nrow = 2)
+figure<-annotate_figure(figure,
+               top = text_grob(sprintf('%s - Number of NaN: %i',col,number_nan), color = "red", face = "bold", size = 14))
+ggsave(figure,file=paste0("./plots2/",col,".png"),width=14,height=10,units="cm")
 }
 
-plot_grob<-arrangeGrob(grobs=plot_list)
-pdf('Scatterplot_1_var.pdf')
-grid.arrange(plot_grob)
-dev.off
-#Scatterplots - continous+discrete
+
 
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
 
 ```{r pressure, echo=FALSE}
-plot(pressure)
+for (col in names(train)){
+train_grouped<-as.data.frame(table(train[col]))
+plot<-ggplot(train_grouped,aes(x=Var1,y=Freq))+geom_bar(stat="identity")+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+ggsave(plot,file=paste0("./count/",col,".png"),width=14,height=10,units="cm")
+}
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
