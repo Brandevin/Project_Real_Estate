@@ -5,19 +5,23 @@ output:
   pdf_document: default
 ---
 
-```{r setup, include=FALSE,echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,WARNING=F,message=F, results='hide',fig.align='center')
 library(plyr)
 library(data.table)
 library(hash)
 library(ggplot2)
+library(reshape2)
 library(lattice)
 library(grid)
 library(gridExtra)
-library(dplyr)
 library(ggpubr)
 library(scales)
 library(tidyr)
+library(PerformanceAnalytics)
+library(car)
+library(mltools)
+
 ```
 
 ## Introduction to the problem
@@ -31,140 +35,313 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r importing_dataset}
-train=read.csv('./Inputs/train.csv')
+df=read.csv('./Inputs/train.csv')
+
+## Separate into training and test
+smp_size<-floor(0.75*nrow(df))
+set.seed(0)
+
+train_ind<- sample(seq_len(nrow(df)), size = smp_size)
+
+train <- df[train_ind, ]
+test <- df[-train_ind, ]
+
+
 ```
 
-```{r pressure, echo=FALSE}
+```{r common_preprocessor}
+#A function that performs multiple changes and operations in the dataset is created, so that it can be applied to the training, test and validation set.
+
+
+common_preprocessor <-function(df,garage_yr_blt_mean,quantile_96_dict,columns_96,quantile_4_dict,columns_04,min_values_dict,columns_min) {
+    #Replacing cells without value with their meaning, when possible
+    # If the reason was because there was no room (Ex: garage), with the properties, create categorical variable "No room_name". If the feature is the area, consider the area as being equal to 0
+    df$Alley<-df$Alley %>% replace_na("No Alley")
+    df$BsmtExposure<-df$BsmtExposure %>% replace_na("NA")
+    df$BsmtFinType1<-df$BsmtFinType1 %>% replace_na("No basement")
+    df$BsmtCond<-df$BsmtCond %>% replace_na(0)
+    df$BsmtQual<-df$BsmtQual %>% replace_na(0)
+    df$Fence<-df$Fence %>% replace_na("No fence")
+    df$FireplaceQu<-df$FireplaceQu %>% replace_na(0)
+    df$GarageCond<-df$GarageCond %>% replace_na(0)
+    df$GarageFinish<-df$GarageFinish %>% replace_na("No garage")
+    df$GarageQual<-df$GarageQual %>% replace_na(0)
+    df$GarageType<-df$GarageType %>% replace_na("No garage")
+    df$LotFrontage<-df$LotFrontage %>% replace_na(0)
+    df$MasVnrArea<-df$MasVnrArea %>% replace_na(0)
+    df$MasVnrType<-df$MasVnrType %>% replace_na('None')
+    df$Electrical<-df$Electrical %>% replace_na('Other')
+    #Dropping features that dont have enough samples distributed in different categories (Some features had only 5 samples that had a different value, for example)
+    drop<-c("RoofMatl","BsmtFinType2","BsmtFinSF2","Heating","KitchenAbvGr","EnclosedPorch","ScreenPorch","PoolArea","MiscFeature","PoolQC","MiscVal","Street","Utilities")
+    df<-df[,!(names(df) %in% drop)]
+    #Substituting Categories by categories that, although less descriptive, are able to generalize more, as there are more samples per category. Either group similar categorizations together, or lump some of them together as "Other".
+    df$BedroomAbvGr<-ifelse(df$BedroomAbvGr<1,1,ifelse(df$BedroomAbvGr>5,5,df$BedroomAbvGr))
+    df$TotRmsAbvGrd<-ifelse(df$TotRmsAbvGrd<4,4,ifelse(df$TotRmsAbvGrd>10,10,df$TotRmsAbvGrd))
+    df$Fireplaces<-ifelse(df$Fireplaces>2,2,df$Fireplaces)
+    df$LotShape <- mapvalues(df$LotShape, from=c("IR1", "IR2", "IR3","Reg"), to=c("IR1", "IR2&IR3","IR2&IR3", "Reg"),warn_missing=FALSE)
+    df$MSSubClass <- mapvalues(df$MSSubClass, from=c(20,30,40,45,50,60,70,75,80,85,90,120,150,160,180,190), to=c("20","30","Other","Other","50","60","70","70","80","80","90","120","Other","160","Other","190"),warn_missing=FALSE)
+    df$LotConfig <- mapvalues(df$LotConfig, from=c("Corner","CulDSac","FR2","FR3","Inside"), to=c("Corner","CulDSac","FR2&FR3","FR2&FR3","Inside"),warn_missing=FALSE)
+    df$Neighborhood <- mapvalues(df$Neighborhood, from=c("Blueste","NPkVill","Veenker"), to=c("Other","Other","Other"),warn_missing=FALSE)
+    df$BsmtExposure <- ifelse(df$BsmtExposure=="Gd","Good",df$BsmtExposure)
+    df$RoofStyle <- ifelse(df$RoofStyle=="Gable","Gable",ifelse(df$RoofStyle=="Hip","Hip","Other"))
+    df$LandSlope <- ifelse(df$LandSlope=="Gtl","Gtl","Other")
+    df$Foundation <- ifelse(df$Foundation=="Stone","Other",ifelse(df$Foundation=="Wood","Other",ifelse(df$Foundation=="Slabt","Other",df$Foundation)))
+    df$MSZoning <- ifelse(df$MSZoning=="FV","FV",ifelse(df$MSZoning=="RM","RM",ifelse(df$MSZoning=="RL","RL","Other")))
+    df$Electrical <- ifelse(df$Electrical=="SBrkr","SBrkr",ifelse(df$Electrical=="FuseA","FuseA","Other"))
+    df$Functional <- ifelse(df$Functional=="Typ","Typ","Other")
+    df$GarageType <- ifelse(df$GarageType=="Attchd","Attchd",ifelse(df$GarageType=="BuiltIn","BuiltIn",ifelse(df$GarageType=="Detchd","Detchd","Other")))
+    df$SaleType <- ifelse(df$SaleType=="WD","WD",ifelse(df$SaleType=="New","New",ifelse(df$SaleType=="COD","COD","Other")))
+    df$SaleCondition <- ifelse(df$SaleCondition=="Normal","Normal",ifelse(df$SaleCondition=="Partial","Abnormal","Other"))
+    df$HouseStyle <- ifelse(df$HouseStyle=="1Story","1Story",ifelse(df$HouseStyle=="1.5Fin","1.5Fin",ifelse(df$HouseStyle=="2Story","2Story",ifelse(df$HouseStyle=="SFoyer","SFoyer",ifelse(df$HouseStyle=="SLvl","SLvl","Other")))))
+    df$Exterior1st <- ifelse(df$Exterior1st=="HdBoard","HdBoard",ifelse(df$Exterior1st=="MetalSd","MetalSd",ifelse(df$Exterior1st=="VinylSd","VinylSd",ifelse(df$Exterior1st=="Wd Sdng","Wd Sdng",ifelse(df$Exterior1st=="CemntBd","CemntBd",ifelse(df$Exterior1st=="BrkFace","BrkFace",ifelse(df$Exterior1st=="WdShing","WdShing","Other")))))))
+    df$Exterior2nd <- ifelse(df$Exterior2nd=="HdBoard","HdBoard",ifelse(df$Exterior2nd=="MetalSd","MetalSd",ifelse(df$Exterior2nd=="VinylSd","VinylSd",ifelse(df$Exterior2nd=="Wd Sdng","Wd Sdng",ifelse(df$Exterior2nd=="CemntBd","CemntBd",ifelse(df$Exterior2nd=="BrkFace","BrkFace",ifelse(df$Exterior1st=="WdShing","WdShing","Other")))))))
+    
+    df$BsmtFullBath[df$BsmtFullBath > 0 ] <- 1
+    df$BsmtHalfBath[df$BsmtHalfBath > 0 ] <- 1
+    df$FullBath[df$FullBath == 0 ] <- 1
+    df$HalfBath[df$HalfBath > 1 ] <- 1
+    df$GarageCars[df$GarageCars > 3 ] <- 3
+    
+    #Create new variables from some of the features, such as condition 1 & condition 2, Exterior1st &Exterior2nd
+    
+    df$Condition<-ifelse(df$Condition1=="Artery" | df$Condition2=="Artery","Artery",ifelse(df$Condition1=="Feedr"|df$Condition2=="Feedr","Feedr","Other"))
+    
+    df$Ext_matl_cementbd<-ifelse(df$Exterior1st=="CemntBd" | df$Exterior2nd=="CemntBd",1,0)
+    df$Ext_matl_brkface<-ifelse(df$Exterior1st=="BrkFace" | df$Exterior2nd=="BrkFace",1,0)
+    df$Ext_matl_hdboard<-ifelse(df$Exterior1st=="HdBoard" | df$Exterior2nd=="HdBoard",1,0)
+    df$Ext_matl_metalsd<-ifelse(df$Exterior1st=="MetalSd" | df$Exterior2nd=="MetalSd",1,0)
+    df$Ext_matl_vinylsd<-ifelse(df$Exterior1st=="VinylSd" | df$Exterior2nd=="VinylSd",1,0)
+    df$Ext_matl_wdsdng<-ifelse(df$Exterior1st=="Wd Sdng" | df$Exterior2nd=="Wd Sdng",1,0)
+    df$Ext_matl_wdshing<-ifelse(df$Exterior1st=="WdShing" | df$Exterior2nd=="WdShing",1,0)
+    
+    #Replace ratings by rating number
+    
+    df[df=="Ex"]<-5
+    df[df=="Gd"]<-4
+    df[df=="TA"]<-3
+    df[df=="Fa"]<-2
+    df[df=="Po"]<-1
+    
+    #Creating new variables when area is equal to 0
+    
+    df$Has2ndFlr<-df$X2ndFlrSF>0
+    df$HasPorch<-df$X3SsnPorch>0
+    df$HaslowQuality_finished<-df$LowQualFinSF>0
+    df$HasOpenPorch<-df$OpenPorchSF>0
+    
+    # Drop columns that were not valid after the creation of the new variables
+    
+    drop<-c("Condition1","Condition2","Exterior1st","Exterior2nd","X3SsnPorch","LowQualFinSF")
+    df<-df[,!(names(df) %in% drop)]
+
+    # Trim Outliers. Assign the values above the threshold as being equal to the threshold
+    for (col in columns_96){
+      df[[col]][df[[col]] > quantile_96_dict[[col]] ] <- quantile_96_dict[[col]]
+    }
+  
+    for (col in columns_04){
+      df[[col]][df[[col]] < quantile_4_dict[[col]] ] <- quantile_4_dict[[col]]
+    }
+  
+    #Substituting values equal to 0 to the minimum value. This way, the leverage of these points is decreased
+    for (col in columns_min){
+      min_values_dict[col]<-min(train[train[[col]]>0,col])
+      df[[col]][df[[col]]==0] <-min_values_dict[[col]]
+  
+    }
+    
+    #Replacing nan by mean value
+    df$GarageYrBlt<-df$GarageYrBlt %>% replace_na(garage_yr_blt_mean)
+  
+        df$LotFrontage<-df$LotFrontage %>% replace_na(0)
+    return (df)
+}
+
+
+
+# Getting 96th percentile of some columns to trim outliers. Values above the 96th percentile for these columns are going to be assigned as equal to the 96th percentile
+columns_96<-c("LotFrontage","LotArea","MasVnrArea","BsmtFinSF1","BsmtUnfSF","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","GrLivArea","GarageArea","WoodDeckSF","OpenPorchSF")
+quantile_96_dict<-hash()
+for (col in columns_96){
+  quantile_96_dict[col]<-quantile(train[[col]],0.96,na.rm=TRUE)
+}
+
+# Getting 4th percentile of some columns to trim outliers. Values above the 96th percentile for these columns are going to be assigned as equal to the 4th percentile
+
+columns_04<-c("GrLivArea","LotArea","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","YearBuilt","WoodDeckSF")
+quantile_4_dict<-hash()
+for (col in columns_04){
+  quantile_4_dict[col]<-quantile(train[train[[col]]>0,col],0.04,na.rm=TRUE)
+}
+#Substituting 0s by the minimum value
+
+min_values_dict<-hash()
+columns_min<-c("GarageArea","LotFrontage","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","WoodDeckSF")
+for (col in columns_min){
+  min_values_dict[col]<-min(train[train[[col]]>0,col])
+}
+
+#Getting mean garage year built value
+garage_yr_blt_mean<-mean(train$GarageYrBlt,na.rm=TRUE)
+
+train<-common_preprocessor(train,garage_yr_blt_mean,quantile_96_dict,columns_96,quantile_4_dict,columns_04,min_values_dict,columns_min)
+
+test<-common_preprocessor(test,garage_yr_blt_mean,quantile_96_dict,columns_96,quantile_4_dict,columns_04,min_values_dict,columns_min)
+
+
+```
+
+
+``` {r correlation_matrix,fig.width=15, fig.height=15,}
+
+plot_cormat<-function(features){
+train_selection<-train[,features]
+train_selection[, features] <- sapply(train_selection[, features], as.numeric)
+
+
+
+cormat <- round(cor(train_selection),2)
+
+melted_cormat <- melt(cormat)
+
+ggplot(melted_cormat, aes(Var2, Var1, fill = value))+
+ geom_tile(color = "white")+
+ scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+   midpoint = 0, limit = c(-1,1), space = "Lab", 
+    name="Pearson\nCorrelation") +
+  theme_minimal()+ # minimal theme
+ theme(axis.text.x = element_text(angle = 90, vjust = 1, 
+    size = 12, hjust = 1),axis.text.y = element_text(angle = 0, vjust = 1, 
+    size = 12, hjust = 1))+
+ coord_fixed() + geom_text(aes(Var2, Var1, label = value), color = "black", size = 4) +
+theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.direction = "horizontal")+
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                title.position = "top", title.hjust = 0.5))  
+  
+}
+
+
+plot_cormat(c("TotRmsAbvGrd","BedroomAbvGr","GarageCars","FullBath","BsmtCond","Fireplaces","GrLivArea","LotArea","GarageArea","MasVnrArea","OpenPorchSF","X1stFlrSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF","BsmtQual","ExterCond","ExterQual","FireplaceQu","GarageCond","GarageQual","HeatingQC","KitchenQual","OverallCond","OverallQual","GarageYrBlt","YearBuilt","YearRemodAdd","YrSold","SalePrice"))
+
+```
+
+
+The effect of both quality and area for the different parts of the house was analyzed through a multilinear regression. Only the following features were considered: **(BsmtQual, ExterQual, FireplaceQu, GarageQual, HeatingQC, KitchenQual, LotArea, GarageArea, MasVnrArea, OpenPorchSF, X2ndFlrSF, TotalBsmtSF, BsmtUnfSF,WoodDeckSF)**. X1stFlrSF was not considered, as it had a very high correlation with TotalBsmtSF.
+The regression had a R-squared (percentage of total variance explained) equal to **`r round(100*r2_lm_expl,1)` %**.
+
+
+``` {r initial_analysis_of_prices, fig.width=10, fig.height=10}
+
+feat<-c("BsmtQual","ExterQual","FireplaceQu","GarageQual","HeatingQC","KitchenQual","SalePrice","LotArea","GarageArea","MasVnrArea","OpenPorchSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF")
+train_selection<-train[,feat]
+train_selection[, feat] <- sapply(train_selection[, feat], as.numeric)
+
+fit_lm_exploratory<-lm(SalePrice~.,train_selection)
+coefs_lm_expl<-summary(fit_lm_exploratory)$coefficients
+r2_lm_expl<-summary(fit_lm_exploratory)$r.squared
+vif_lm_expl<-vif(fit_lm_exploratory)
+```
+
+
+```{r plot_quality,fig.width=6, fig.height=6}
+coefs_quality<-c("BsmtQual","ExterQual","FireplaceQu","GarageQual","HeatingQC","KitchenQual")
+means_qual<-coefs_lm_expl[coefs_quality,"Estimate"]
+std_qual<-coefs_lm_expl[coefs_quality,"Std. Error"]
+relevant_qual<-ifelse(coefs_lm_expl[coefs_quality,"Pr(>|t|)"]<0.05,"deepskyblue","tomato")[order(means_qual,decreasing=FALSE)]
+
+
+df_qual<-data.frame(means_qual,std_qual,coefs_quality,relevant_qual) %>% arrange(means_qual)
+names(df_qual)<-c("Regression_coefficient","Standard_Error","Feature","Statistically_relevant")
+p <- ggplot(df_qual, aes(x=reorder(Feature, -Regression_coefficient), y=Regression_coefficient)) + 
+   geom_bar(stat="identity", position=position_dodge(),fill=relevant_qual) +
+   geom_errorbar(aes(ymin=qnorm(.95,Regression_coefficient,Standard_Error), ymax=qnorm(.05,Regression_coefficient,Standard_Error)), width=.2,position=position_dodge(.9))+
+   geom_text(aes(label=round(Regression_coefficient)), vjust=-0.3, color="black",fontface ="bold",
+            position = position_dodge(0.9), size=3.5)+ 
+   theme(panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),plot.title = element_text(hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5))+ 
+  labs(title = "Regression coefficients for features related to quality",
+              subtitle = "For each 1 star increase, the price increases according to the bar value.\n Vertical lines shows the 95% interval of confidence of the slope value.\nBlue bars are statistically significant.",
+              x="Feature Name",y="Feature Slope in the regression ($/star)")+ 
+  scale_y_continuous(breaks=seq(0,25000,5000))
+
+  
+  
+p + scale_fill_brewer(palette="Paired")
+```
+
+```{r plot_area,fig.width=8, fig.height=6}
+coefs_area<-c("LotArea","GarageArea","MasVnrArea","OpenPorchSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF")
+means_area<-coefs_lm_expl[coefs_area,"Estimate"]
+std_area<-coefs_lm_expl[coefs_area,"Std. Error"]
+relevant_area<-ifelse(coefs_lm_expl[coefs_area,"Pr(>|t|)"]<0.05,"deepskyblue","tomato")[order(means_area,decreasing=FALSE)]
+
+
+df_area<-data.frame(means_area,std_area,coefs_area,relevant_area) %>% arrange(means_area)
+names(df_area)<-c("Regression_coefficient","Standard_Error","Feature","Statistically_relevant")
+p <- ggplot(df_area, aes(x=reorder(Feature, -Regression_coefficient), y=Regression_coefficient)) + 
+   geom_bar(stat="identity", position=position_dodge(),fill=relevant_area) +
+   geom_errorbar(aes(ymin=qnorm(.95,Regression_coefficient,Standard_Error), ymax=qnorm(.05,Regression_coefficient,Standard_Error)), width=.2,position=position_dodge(.9))+
+   geom_text(aes(label=round(Regression_coefficient,1)), vjust=-0.3, color="black",fontface ="bold",
+            position = position_dodge(0.9), size=3.5)+ 
+   theme(panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),panel.background = element_blank(), axis.line = element_line(colour = "black"),plot.title = element_text(hjust = 0.5),
+  plot.subtitle = element_text(hjust = 0.5))+ 
+  labs(title = "Regression coefficients for features related to Area",
+              subtitle = "For each 1 Square Foot increase, the price increases according to the bar value.\n Vertical lines shows the 95% interval of confidence of the slope value.\nBlue bars are statistically significant.",
+              x="Feature Name",y="Feature Slope in the regression ($/SF)")+ 
+  scale_y_continuous(breaks=seq(0,25000,5000))
+
+  
+  
+p + scale_fill_brewer(palette="Paired")
+```
+
+
+
+```{r relative_importance,eval=FALSE}
+#Redo with all variables, eliminate least important ones
+library(relaimpo)
+
+feat<-c("TotRmsAbvGrd","BedroomAbvGr","GarageCars","FullBath","BsmtCond","Fireplaces","GrLivArea","LotArea","GarageArea","MasVnrArea","OpenPorchSF","X1stFlrSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF","BsmtQual","ExterCond","ExterQual","FireplaceQu","GarageCond","GarageQual","HeatingQC","KitchenQual","OverallCond","OverallQual","GarageYrBlt","YearBuilt","YearRemodAdd","SalePrice")
+train[, feat] <- sapply(train[, feat], as.numeric)
+
+
+fit_full<-lm(SalePrice~ as.factor(MSSubClass),train)
+
+a<-calc.relimp(fit_full,type=c("lmg"),
+   rela=TRUE,sort=TRUE)
+plot(a)
+
+boot <- boot.relimp(fit_full, b = 1000, type = c("lmg"), rank = TRUE,
+  diff = TRUE, rela = TRUE)
+(booteval.relimp(boot) # print result
+```
+
+``` {r calculate_rmsle}
+#Root mean square logarithm error
+rmsle(predict(fit_full,test),test$SalePrice)
+```
+
+```{r exploratory_plots, eval=FALSE}
+#Exploratory plots used to understand each column before preprocessing
+
 continous_vars<-c()
 discrete_vars<-c()
-for (col in names(train)){
-                if (nrow(unique(train[col]))>26){
+for (col in names(df)){
+                if (nrow(unique(df[col]))>26){
                                 continous_vars<-c(continous_vars,col)
                 }
                 else {
                                 discrete_vars<-c(discrete_vars,col)
                 }
 }
-
-#Replacing cells without value with their meaning, when possible
-train$Alley<-train$Alley %>% replace_na("No Alley")
-train$BsmtExposure<-train$BsmtExposure %>% replace_na("NA")
-train$BsmtFinType1<-train$BsmtFinType1 %>% replace_na("No basement")
-train$BsmtCond<-train$BsmtCond %>% replace_na(0)
-train$BsmtQual<-train$BsmtQual %>% replace_na(0)
-train$Fence<-train$Fence %>% replace_na("No fence")
-train$FireplaceQu<-train$FireplaceQu %>% replace_na(0)
-train$GarageCond<-train$GarageCond %>% replace_na(0)
-train$GarageFinish<-train$GarageFinish %>% replace_na("No garage")
-train$GarageQual<-train$GarageQual %>% replace_na(0)
-train$GarageType<-train$GarageType %>% replace_na("No garage")
-train$GarageYrBlt<-train$GarageYrBlt %>% replace_na(mean(train$GarageYrBlt,na.rm=TRUE))
-train$LotFrontage<-train$LotFrontage %>% replace_na(0)
-train$MasVnrArea<-train$MasVnrArea %>% replace_na(0)
-train$MasVnrType<-train$MasVnrType %>% replace_na('None')
-train$Electrical<-train$Electrical %>% replace_na('Other')
-
-#Dropping features that dont have enough variables with different values, to avoid overfitting.
-train<-train %>% select(-c(RoofMatl,BsmtFinType2,BsmtFinSF2,Heating,KitchenAbvGr,EnclosedPorch,ScreenPorch,PoolArea,MiscFeature,PoolQC,MiscVal,Street,Utilities))
-
-#Substituting Categories by categories that, although less descriptive, are able to generalize more, as there are more samples per category
-train$BedroomAbvGr<-ifelse(train$BedroomAbvGr<1,1,ifelse(train$BedroomAbvGr>5,5,train$BedroomAbvGr))
-train$TotRmsAbvGrd<-ifelse(train$TotRmsAbvGrd<4,4,ifelse(train$TotRmsAbvGrd>10,10,train$TotRmsAbvGrd))
-train$Fireplaces<-ifelse(train$Fireplaces>2,2,train$Fireplaces)
-
-
-train$LotShape <- mapvalues(train$LotShape, from=c("IR1", "IR2", "IR3","Reg"), to=c("IR1", "IR2&IR3","IR2&IR3", "Reg"))
-train$MSSubClass <- mapvalues(train$MSSubClass, from=c(20,30,40,45,50,60,70,75,80,85,90,120,150,160,180,190), to=c("20","30","Other","Other","50","60","70","70","80","80","90","120","Other","160","Other","190"),warn_missing=FALSE)
-
-
-train$LotConfig <- mapvalues(train$LotConfig, from=c("Corner","CulDSac","FR2","FR3","Inside"), to=c("Corner","CulDSac","FR2&FR3","FR2&FR3","Inside"))
-
-train$Neighborhood <- mapvalues(train$Neighborhood, from=c("Blueste","NPkVill","Veenker"), to=c("Other","Other","Other"))
-
-train$BsmtExposure <- ifelse(train$BsmtExposure=="Gd","Good",train$BsmtExposure)
-
-train$RoofStyle <- ifelse(train$RoofStyle=="Gable","Gable",ifelse(train$RoofStyle=="Hip","Hip","Other"))
-train$LandSlope <- ifelse(train$LandSlope=="Gtl","Gtl","Other")
-train$Foundation <- ifelse(train$Foundation=="Stone","Other",ifelse(train$Foundation=="Wood","Other",ifelse(train$Foundation=="Slabt","Other",train$Foundation)))
-train$MSZoning <- ifelse(train$MSZoning=="FV","FV",ifelse(train$MSZoning=="RM","RM",ifelse(train$MSZoning=="RL","RL","Other")))
-
-train$Electrical <- ifelse(train$Electrical=="SBrkr","SBrkr",ifelse(train$Electrical=="FuseA","FuseA","Other"))
-train$Functional <- ifelse(train$Functional=="Typ","Typ","Other")
-
-train$GarageType <- ifelse(train$GarageType=="Attchd","Attchd",ifelse(train$GarageType=="BuiltIn","BuiltIn",ifelse(train$GarageType=="Detchd","Detchd","Other")))
-
-train$SaleType <- ifelse(train$SaleType=="WD","WD",ifelse(train$SaleType=="New","New",ifelse(train$SaleType=="COD","COD","Other")))
-train$SaleCondition <- ifelse(train$SaleCondition=="Normal","Normal",ifelse(train$SaleCondition=="Partial","Abnormal","Other"))
-train$HouseStyle <- ifelse(train$HouseStyle=="1Story","1Story",ifelse(train$HouseStyle=="1.5Fin","1.5Fin",ifelse(train$HouseStyle=="2Story","2Story",ifelse(train$HouseStyle=="SFoyer","SFoyer",ifelse(train$HouseStyle=="SLvl","SLvl","Other")))))
-
-
-
-train$Exterior1st <- ifelse(train$Exterior1st=="HdBoard","HdBoard",ifelse(train$Exterior1st=="MetalSd","MetalSd",ifelse(train$Exterior1st=="VinylSd","VinylSd",ifelse(train$Exterior1st=="Wd Sdng","Wd Sdng",ifelse(train$Exterior1st=="CemntBd","CemntBd",ifelse(train$Exterior1st=="BrkFace","BrkFace",ifelse(train$Exterior1st=="WdShing","WdShing","Other")))))))
-train$Exterior2nd <- ifelse(train$Exterior2nd=="HdBoard","HdBoard",ifelse(train$Exterior2nd=="MetalSd","MetalSd",ifelse(train$Exterior2nd=="VinylSd","VinylSd",ifelse(train$Exterior2nd=="Wd Sdng","Wd Sdng",ifelse(train$Exterior2nd=="CemntBd","CemntBd",ifelse(train$Exterior2nd=="BrkFace","BrkFace",ifelse(train$Exterior1st=="WdShing","WdShing","Other")))))))
-
-train$BsmtFullBath[train$BsmtFullBath > 0 ] <- 1
-train$BsmtHalfBath[train$BsmtHalfBath > 0 ] <- 1
-train$FullBath[train$FullBath == 0 ] <- 1
-train$BsmtHa[train$HalfBath > 1 ] <- 1
-train$GarageCars[train$GarageCars > 3 ] <- 3
-
-
-
-#Create new variables with Condition
-train$Condition<-ifelse(train$Condition1=="Artery" | train$Condition2=="Artery","Artery",ifelse(train$Condition1=="Feedr"|train$Condition2=="Feedr","Feedr","Other"))
-
-
-train$Ext_matl_cementbd<-ifelse(train$Exterior1st=="CemntBd" | train$Exterior2nd=="CemntBd",1,0)
-train$Ext_matl_brkface<-ifelse(train$Exterior1st=="BrkFace" | train$Exterior2nd=="BrkFace",1,0)
-train$Ext_matl_hdboard<-ifelse(train$Exterior1st=="HdBoard" | train$Exterior2nd=="HdBoard",1,0)
-train$Ext_matl_metalsd<-ifelse(train$Exterior1st=="MetalSd" | train$Exterior2nd=="MetalSd",1,0)
-train$Ext_matl_vinylsd<-ifelse(train$Exterior1st=="VinylSd" | train$Exterior2nd=="VinylSd",1,0)
-train$Ext_matl_wdsdng<-ifelse(train$Exterior1st=="Wd Sdng" | train$Exterior2nd=="Wd Sdng",1,0)
-train$Ext_matl_wdshing<-ifelse(train$Exterior1st=="WdShing" | train$Exterior2nd=="WdShing",1,0)
-
-#Replace ratings by rating number
-
-train[train=="Ex"]<-10
-train[train=="Gd"]<-8
-train[train=="TA"]<-6
-train[train=="Fa"]<-4
-train[train=="Po"]<-2
-
-
-#Creating new variables when area is equal to 0
-
-train$HasLot<-train$LotFrontage>0
-train$Has2ndFlr<-train$X2ndFlrSF>0
-train$HasPorch<-train$X3SsnPorch>0
-train$HaslowQuality_finished<-train$LowQualFinSF>0
-train$HasOpenPorch<-train$OpenPorchSF>0
-
-#
-train<-train %>% select(-c(Condition1,Condition2,Exterior1st,Exterior2nd,X3SsnPorch,LowQualFinSF))
-
-
-# Trim Outliers
-columns<-c("LotFrontage","LotArea","MasVnrArea","BsmtFinSF1","BsmtUnfSF","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","GrLivArea","GarageArea","WoodDeckSF","OpenPorchSF")
-for (col in columns){
-  quant96<-quantile(train[[col]],0.96,na.rm=TRUE)
-  train[[col]][train[[col]] > quant96 ] <- quant96
-}
-columns_lower<-c("GrLivArea","LotArea","TotalBsmtSF","X1stFlrSF","X2ndFlrSF","YearBuilt","WoodDeckSF")
-for (col in columns_lower){
-  quant4<-quantile(train[train[[col]]>0,col],0.04,na.rm=TRUE)
-  train[[col]][train[[col]] < quant4 ] <- quant4
-}
-#Substituting 0s by the minimum value
-train$GarageArea[train$GarageArea==0] <-min(train[train$GarageArea>0,"GarageArea"])
-train$LotFrontage[train$LotFrontage==0] <-min(train[train$LotFrontage>0,"LotFrontage"])
-train$LotFrontage[train$TotalBsmtSF==0] <-min(train[train$TotalBsmtSF>0,"TotalBsmtSF"])
-train$LotFrontage[train$X1stFlrSF==0] <-min(train[train$X1stFlrSF>0,"X1stFlrSF"])
-train$X2ndFlrSF[train$X2ndFlrSF==0] <-min(train[train$X2ndFlrSF>0,"X2ndFlrSF"])
-train$WoodDeckSF[train$WoodDeckSF==0] <-min(train[train$WoodDeckSF>0,"WoodDeckSF"])
-
-
-
-#plots
 
 for (col in names(train)){
                 number_nan<-sum(is.na(train[[col]]))
@@ -196,17 +373,6 @@ figure<-annotate_figure(figure,
 ggsave(figure,file=paste0("./plots2/",col,".png"),width=14,height=10,units="cm")
 }
 
-
-
-```
-
-
-```{r pressure, echo=FALSE}
-for (col in names(train)){
-train_grouped<-as.data.frame(table(train[col]))
-plot<-ggplot(train_grouped,aes(x=Var1,y=Freq))+geom_bar(stat="identity")+ggtitle(col)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-ggsave(plot,file=paste0("./count/",col,".png"),width=14,height=10,units="cm")
-}
 
 ```
 
