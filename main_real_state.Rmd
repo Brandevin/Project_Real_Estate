@@ -21,21 +21,30 @@ library(tidyr)
 library(PerformanceAnalytics)
 library(car)
 library(mltools)
+library(kableExtra)
+library(magrittr)
 
 ```
 
-## Introduction to the problem
+## 1. Introduction
 
-## Describe the data
+House prices are commonly known to be influenced by the house area, the preservation of the rooms and the overall quality of the construction. However, other not so intuitive factors may play a hand in the pricing of the house. Some of these factors may include the proximity to a railroad, the shape of the property, the material of the road that leads to the house and many others.
 
-## R Markdown
+The aim of this notebook is to analyze the main factors impacting the house prices in the city of Ames as well as predict their values using machine learning models.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The data is obtained from a kaggle competition available at ([House Prices](https://www.kaggle.com/c/house-prices-advanced-regression-techniques/overview)). The data contains a total of **79 variables** explaining different aspects of the homes. The data is divided into a **training dataset of 1460 observations** with information about the price and a **validation dataset of 1459 observations**, where the prices are unknown. This objective is to predict the validation dataset prices and submit them to kaggle, which will then rank the submissions sent by different people.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+The metric used to rank the different submissions was the root mean squared logarithm error (RMSLE - the RMSE between the logarithm of the predicted value and the logarithm of the observed price), which means that errors in predicting expensive and cheap houses will affect the result equally.
 
-```{r importing_dataset}
+## 2. Processing the data
+
+The raw data which was collected directly from the csv files is shown below. For more information about the meaning of each variable, check the README file available at the [github repository](https://github.com/Brandevin/Project_Real_State). 
+
+The data contains information about the area, quality and condition of different rooms, the number of rooms, the styles and materials of house components, the neighborhood, the type of house, the type and date of sale and many others.
+
+```{r importing_dataset,results='asis'}
 df=read.csv('./Inputs/train.csv')
+df_validate=read.csv('./Inputs/test.csv')
 
 ## Separate into training and test
 smp_size<-floor(0.75*nrow(df))
@@ -46,10 +55,32 @@ train_ind<- sample(seq_len(nrow(df)), size = smp_size)
 train <- df[train_ind, ]
 test <- df[-train_ind, ]
 
+row.names(train) <- NULL
 
+head(train,60) %>%kbl()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"),fixed_thead = T) %>%
+  kableExtra::scroll_box(width = "100%", height = "300px") %>%
+  kable_material()
 ```
 
-```{r common_preprocessor}
+
+The data was then divided into a training set (**1095** observations) and a test set (**365** observations). All analysis and model training were performed on the training set, while the test set was used to calculate the model metrics.
+
+By analyzing scatterplots and barplots, it was found the dataset had missing values, outliers and messy data. To deal with this, the following operations were performed:
+
+1. Missing values were replaced by 0 for features related to the area or the number of components (Ex: The variable "MasVnrArea" was missing when there was no Masonry veneer, which means its area is equal to 0). 
+2. Categorical variables with missing values were assigned a value according to the variable description (Ex: The variable "Fence" had no value when there was no fence. The missing values in this case were assigned as belonging to a category named "No fence").
+3. In the particular case of "GarageYrBlt", missing values meant that there was no garage. To make sure these values had low leverage, they were made to be equal to the mean year of the other observations.
+4. Categorical variables which had almost all observations in the same category (Ex: 1450 observations in a single category, 10 in others) were dropped, as there was not enough data for them to be statistically relevant.
+5. Categorical variables which belonged to a category with few samples (Ex: A variable that has a category with only 8 observations) were either lumped together in another similar category or into a category which was them named "Others"
+6. Observations that had integer variables much higher than the others (outliers) were assigned a lower number to reduce the leverage these variables could exert in a linear regression. (Ex: Only 4 houses had more than 3 garage parking spots. These 4 houses were assigned as having 3 garages)
+7. Similar to the integer values, continous variables (such as Area) were assigned an upper and lower bound value to decrease the leverage of the outliers These bounds were based on the 4th and 96th percentile of the training set.
+8. The quality and condition variables, which had values "Ex","Gd","TA","Fa","Po" (Excellent, good, typical, fair, poor), were transformed into continous variables with the values: 5, 4, 3, 2, 1.
+9. Some variables related to whether the house has a second floor, a porch or other room were created based on whether the area was equal to 0 or not.
+
+
+The processed table after all these modifications is shown below.
+
+```{r common_preprocessor,results='asis'}
 #A function that performs multiple changes and operations in the dataset is created, so that it can be applied to the training, test and validation set.
 
 
@@ -188,9 +219,16 @@ train<-common_preprocessor(train,garage_yr_blt_mean,quantile_96_dict,columns_96,
 
 test<-common_preprocessor(test,garage_yr_blt_mean,quantile_96_dict,columns_96,quantile_4_dict,columns_04,min_values_dict,columns_min)
 
-
+head(train,60) %>%kbl()%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"),fixed_thead = T) %>%
+  kableExtra::scroll_box(width = "100%", height = "300px") %>%
+  kable_material()
 ```
 
+## 3. Exploration of the data
+
+### 3.1 Continous variables
+
+Before starting to build the models, it is interesting to analyze the relationship between the different variables to understand how each of them affects the price and how similar one variable may be to the other. The figure below shows the correlation matrix of the continous variables of the dataset.
 
 ``` {r correlation_matrix,fig.width=15, fig.height=15,}
 
@@ -232,10 +270,13 @@ theme(
 plot_cormat(c("TotRmsAbvGrd","BedroomAbvGr","GarageCars","FullBath","BsmtCond","Fireplaces","GrLivArea","LotArea","GarageArea","MasVnrArea","OpenPorchSF","X1stFlrSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF","BsmtQual","ExterCond","ExterQual","FireplaceQu","GarageCond","GarageQual","HeatingQC","KitchenQual","OverallCond","OverallQual","GarageYrBlt","YearBuilt","YearRemodAdd","YrSold","SalePrice"))
 
 ```
+From the figure:
 
+* Area variables were highly correlated between themselves, with the number of rooms and with the price: The bigger the house, the more amount of rooms there are, the higher the total room area and the higher the price.
 
-The effect of both quality and area for the different parts of the house was analyzed through a multilinear regression. Only the following features were considered: **(BsmtQual, ExterQual, FireplaceQu, GarageQual, HeatingQC, KitchenQual, LotArea, GarageArea, MasVnrArea, OpenPorchSF, X2ndFlrSF, TotalBsmtSF, BsmtUnfSF,WoodDeckSF)**. X1stFlrSF was not considered, as it had a very high correlation with TotalBsmtSF.
-The regression had a R-squared (percentage of total variance explained) equal to **`r round(100*r2_lm_expl,1)` %**.
+* The same happened for condition and quality: A house that has a room with a high quality normally has a high quality for the other rooms and the expected price is higher.
+
+* The variables better correlated with price were the quality and area. The year the house was built or remodeled was also useful.
 
 
 ``` {r initial_analysis_of_prices, fig.width=10, fig.height=10}
@@ -250,6 +291,18 @@ r2_lm_expl<-summary(fit_lm_exploratory)$r.squared
 vif_lm_expl<-vif(fit_lm_exploratory)
 ```
 
+The effect of both quality and area for the different parts of the house was analyzed through a multilinear regression. Only the following features were considered: **(BsmtQual, ExterQual, FireplaceQu, GarageQual, HeatingQC, KitchenQual, LotArea, GarageArea, MasVnrArea, OpenPorchSF, X2ndFlrSF, TotalBsmtSF, BsmtUnfSF,WoodDeckSF)**. 
+The regression had an R-squared (percentage of total variance explained) equal to **`r round(100*r2_lm_expl,1)` %**.
+
+The multilinear regression uses the equation below. It calculates the parameters _a0_ and _bi_ that best reduce the square error between the regression and the real data.
+
+$$
+SalePrice = a_0+b_1*BsmtQual+b_2*ExterQual+b_3*FireplaceQu+b_4*GarageQual+b_5*HeatingQC+b_6*KitchenQual\\+b_7*LotArea+b_8*GarageArea+b_9*MasVnrArea+b_{10}*OpenPorchSF+b_{11}*X2ndFlrSF+b_{12}*TotalBsmtSF\\+b_{13}*BsmtUnfSF+b_{14}*WoodDeckSF
+$$
+
+The _bi_ parameters, which are the slopes of the different variables, can be used to analyze the relation between each variable and the price. The plot below shows each of the slopes as well as their 95% interval of confidence. It shows by how much the price increases for each additional "Star" in the quality of the room.
+
+The rooms where the quality matters the most are the External and Kitchen room, where each additional star is expected to increase the house price by 20k$. The garage quality did not seem to impact the price.
 
 ```{r plot_quality,fig.width=6, fig.height=6}
 coefs_quality<-c("BsmtQual","ExterQual","FireplaceQu","GarageQual","HeatingQC","KitchenQual")
@@ -277,6 +330,14 @@ p <- ggplot(df_qual, aes(x=reorder(Feature, -Regression_coefficient), y=Regressi
 p + scale_fill_brewer(palette="Paired")
 ```
 
+The slopes of the area variables were also analyzed. Through these slopes it is possible to understand by how much each square foot increases the price in different rooms. 
+
+The Basement area (or 1st floor area, since this variable was very correlated to X1stFlrSF in the matrix) and the 2nd floor area were the most important area variables. For each 1 extra square foot, the price increased by 80$.
+
+Interesting to notice is that, although BsmtUnfSF has a negative slope, the correct interpretation is that an additional unfinished square foot actually increases the price by 80.9-20.1=60.8$ (Since this unfinished area is part of the total. It is better to have a house with 100 SF, out of which 20 SF are unfinished, than to have a house with 80 SF).
+
+Finally, the OpenPorch area influence on the price was not statistically relevant for a 95% interval of confidence (p_value=0.05).
+
 ```{r plot_area,fig.width=8, fig.height=6}
 coefs_area<-c("LotArea","GarageArea","MasVnrArea","OpenPorchSF","X2ndFlrSF","TotalBsmtSF","BsmtUnfSF","WoodDeckSF")
 means_area<-coefs_lm_expl[coefs_area,"Estimate"]
@@ -296,7 +357,7 @@ p <- ggplot(df_area, aes(x=reorder(Feature, -Regression_coefficient), y=Regressi
   labs(title = "Regression coefficients for features related to Area",
               subtitle = "For each 1 Square Foot increase, the price increases according to the bar value.\n Vertical lines shows the 95% interval of confidence of the slope value.\nBlue bars are statistically significant.",
               x="Feature Name",y="Feature Slope in the regression ($/SF)")+ 
-  scale_y_continuous(breaks=seq(0,25000,5000))
+  scale_y_continuous(breaks=seq(-20,90,10))
 
   
   
@@ -324,7 +385,7 @@ boot <- boot.relimp(fit_full, b = 1000, type = c("lmg"), rank = TRUE,
 (booteval.relimp(boot) # print result
 ```
 
-``` {r calculate_rmsle}
+``` {r calculate_rmsle,eval=FALSE}
 #Root mean square logarithm error
 rmsle(predict(fit_full,test),test$SalePrice)
 ```
