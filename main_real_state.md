@@ -9781,9 +9781,9 @@ $$
 SalePrice = a_0+b_1*BsmtQual+b_2*ExterQual+b_3*FireplaceQu+b_4*GarageQual+b_5*HeatingQC+b_6*KitchenQual\\+b_7*LotArea+b_8*GarageArea+b_9*MasVnrArea+b_{10}*OpenPorchSF+b_{11}*X2ndFlrSF+b_{12}*TotalBsmtSF\\+b_{13}*BsmtUnfSF+b_{14}*WoodDeckSF
 $$
 
-The b_i parameters, which are the slope of the different variables, can be used to analyze the relation between each variable and the price. The plot below shows each of the slopes as well as their 95% interval of confidence. It shows by how much the price increases for each additional "Star" in the quality of the room.
+The _bi_ parameters, which are the slopes of the different variables, can be used to analyze the relation between each variable and the price. The plot below shows each of the slopes as well as their 95% interval of confidence. It shows by how much the price increases for each additional "Star" in the quality of the room.
 
-The area where the quality matters the most are the External and Kitchen area, where each additional star is expected to increase the house price by 20k$. The garage quality did not seem to impact the price.
+The rooms where the quality matters the most are the External and Kitchen room, where each additional star is expected to increase the house price by 20k$. The garage quality did not seem to impact the price.
 
 <img src="figure/plot_quality-1.png" title="plot of chunk plot_quality" alt="plot of chunk plot_quality" style="display: block; margin: auto;" />
 
@@ -9791,20 +9791,93 @@ The slopes of the area variables were also analyzed. Through these slopes it is 
 
 The Basement area (or 1st floor area, since this variable was very correlated to X1stFlrSF in the matrix) and the 2nd floor area were the most important area variables. For each 1 extra square foot, the price increased by 80$.
 
-Interesting to notice is that, although BsmtUnfSF has a negative slope, the correct interpretation is that an additional unfinished square foot actually increases the price by 80.9-20.1=60.8 (Since this unfinished area is part of the total. It is better to have a house with 100 SF, out of which 20 SF are unfinished, than to have a house with 80 SF).
+Interesting to notice is that, although BsmtUnfSF has a negative slope, the correct interpretation is that an additional unfinished square foot actually increases the price by 80.9-20.1=60.8$ (Since this unfinished area is part of the total. It is better to have a house with 100 SF, out of which 20 SF are unfinished, than to have a house with 80 SF).
 
 Finally, the OpenPorch area influence on the price was not statistically relevant for a 95% interval of confidence (p_value=0.05).
 
 <img src="figure/plot_area-1.png" title="plot of chunk plot_area" alt="plot of chunk plot_area" style="display: block; margin: auto;" />
 
 
+#### **3.1.1 A note on the validity of the slope analysis**
+
+Before finishing the analysis of the relation between the features and the price, it is important to understand the validity of the slope values and if the regression may have a multicollinearity problem.
+
+Multicollinearity is a phenomenom in which one predictor variable in a multi regression can be linearly predicted by the other variables with a good degree of accuracy. In a regression with many correlated variables, the coefficient estimates (slopes) may change a lot for small changes in the model data.
+
+In other words, the higher the collinearity between the features, the higher will be the standard error of each of the coefficient estimates. A higher standard error means that the estimation of these coefficients is less precise (interval of confidence of where the real value may be is wider).
+
+To account for this, the Variation Inflation Factor (VIF) is used. This factor is the ratio between the variance of the predictor in the model by the variance if only this predictor was used. A VIF equal to 1.7 means that the variance of this predictor is 70% higher than it would be if only this predictor was used to estimate the model.
+
+Normally, a VIF of less than 4 is acceptable ([https://online.stat.psu.edu/stat462/node/180/](*)), meaning that the multi-regressor coefficients can be interpreted. The table below shows that there was no multicollinearity problem in the previous analysis.
+
+<table class="table table-striped table-hover table-condensed lightable-material" style='width: auto !important; margin-left: auto; margin-right: auto; font-family: "Source Sans Pro", helvetica, sans-serif; margin-left: auto; margin-right: auto;'>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> BsmtQual </td>
+   <td style="text-align:right;"> 1.8 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> ExterQual </td>
+   <td style="text-align:right;"> 2.6 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> FireplaceQu </td>
+   <td style="text-align:right;"> 1.4 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> GarageQual </td>
+   <td style="text-align:right;"> 1.3 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> HeatingQC </td>
+   <td style="text-align:right;"> 1.5 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> KitchenQual </td>
+   <td style="text-align:right;"> 2.3 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> LotArea </td>
+   <td style="text-align:right;"> 1.4 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> GarageArea </td>
+   <td style="text-align:right;"> 2.1 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> MasVnrArea </td>
+   <td style="text-align:right;"> 1.3 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> OpenPorchSF </td>
+   <td style="text-align:right;"> 1.2 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> X2ndFlrSF </td>
+   <td style="text-align:right;"> 1.6 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> TotalBsmtSF </td>
+   <td style="text-align:right;"> 2.8 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> BsmtUnfSF </td>
+   <td style="text-align:right;"> 1.3 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> WoodDeckSF </td>
+   <td style="text-align:right;"> 1.1 </td>
+  </tr>
+</tbody>
+</table>
+
+
+The use of highly correlated features in a multiple regression is known as multicollinearity. In this
 
 
 
 
-```
-## Error in predict(fit_full, test): objeto 'fit_full' não encontrado
-```
+
 
 
 

@@ -26,7 +26,7 @@ library(magrittr)
 
 ```
 
-## 1. Introduction
+## **1. Introduction**
 
 House prices are commonly known to be influenced by the house area, the preservation of the rooms and the overall quality of the construction. However, other not so intuitive factors may play a hand in the pricing of the house. Some of these factors may include the proximity to a railroad, the shape of the property, the material of the road that leads to the house and many others.
 
@@ -36,7 +36,7 @@ The data is obtained from a kaggle competition available at ([House Prices](http
 
 The metric used to rank the different submissions was the root mean squared logarithm error (RMSLE - the RMSE between the logarithm of the predicted value and the logarithm of the observed price), which means that errors in predicting expensive and cheap houses will affect the result equally.
 
-## 2. Processing the data
+## **2. Processing the data**
 
 The raw data which was collected directly from the csv files is shown below. For more information about the meaning of each variable, check the README file available at the [github repository](https://github.com/Brandevin/Project_Real_State). 
 
@@ -224,9 +224,9 @@ head(train,60) %>%kbl()%>%kable_styling(bootstrap_options = c("striped", "hover"
   kable_material()
 ```
 
-## 3. Exploration of the data
+## **3. Exploration of the data**
 
-### 3.1 Continous variables
+### **3.1 Continous variables**
 
 Before starting to build the models, it is interesting to analyze the relationship between the different variables to understand how each of them affects the price and how similar one variable may be to the other. The figure below shows the correlation matrix of the continous variables of the dataset.
 
@@ -362,6 +362,26 @@ p <- ggplot(df_area, aes(x=reorder(Feature, -Regression_coefficient), y=Regressi
   
   
 p + scale_fill_brewer(palette="Paired")
+```
+
+
+#### **3.1.1 A note on the validity of the slope analysis**
+
+To validate the slope values obtained in the previous section, it is important to check if the regressor is subject to a Multicollinearity problem.
+
+Multicollinearity is a phenomenom in which one predictor variable in a multi regression can be linearly predicted by the other variables with a good degree of accuracy. In a regression with many correlated variables, the coefficient estimates (slopes) may change a lot for small changes in the model data.
+
+In other words, the higher the collinearity between the features, the higher will be the standard error of each of the coefficient estimates. A higher standard error means that the estimation of these coefficients is less precise (interval of confidence of where the real value may be is wider).
+
+To account for this, the Variation Inflation Factor (VIF) is used. This factor is the ratio between the variance of the predictor in the model by the variance if only this predictor was used. A VIF equal to 1.7 means that the variance of this predictor is 70% higher than it would be if only this predictor was used to estimate the model.
+
+Normally, a VIF of less than 4 is acceptable ([https://online.stat.psu.edu/stat462/node/180/](*)), meaning that the multi-regressor coefficients can be interpreted. The table below shows that there was no multicollinearity problem in the previous analysis.
+
+```{r vif,results='asis'}
+
+round(vif_lm_expl,1)%>%kbl(col.names=NULL)%>%kable_styling(bootstrap_options = c("striped", "hover", "condensed"),fixed_thead = T,full_width = F) %>%
+  kable_material()
+
 ```
 
 
