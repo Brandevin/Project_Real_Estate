@@ -1,23 +1,39 @@
 # Library versions used
 
 R version 4.0.3 (2020-10-10)
+
 Platform: x86_64-w64-mingw32/x64 (64-bit)
+
 Running under: Windows 10 x64 (build 19041)
 
 plyr 1.8.6
+
 data.table 1.13.2
+
 hash 2.2.6.1
+
 ggplot2 3.3.2
+
 reshape2 1.4.4
+
 gridExtra 2.3
+
 ggpubr 0.4.0
+
 tidyr 1.1.2
+
 car 3.0-10
+
 mltools 0.3.5
+
 kableExtra 1.3.4
+
 caret 6.0-86
+
 xgboost 1.3.2.1
+
 Matrix 1.2-18
+
 e1071 1.7-4
 
 # Variables information
