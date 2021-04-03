@@ -1,5 +1,5 @@
 ---
-title: "Real State price prediction with Regression Models"
+title: "Real Estate price prediction with Regression Models"
 output:
   html_document: default
   pdf_document: default
@@ -14,22 +14,22 @@ library(data.table)
 library(hash)
 library(ggplot2)
 library(reshape2)
-library(lattice)
+#library(lattice)
 library(grid)
 library(gridExtra)
 library(ggpubr)
-library(scales)
+#library(scales)
 library(tidyr)
 library(car)
 library(mltools)
 library(kableExtra)
-library(magrittr)
-library(faux)
-library(randomForest)
+#library(magrittr)
+#library(faux)
+#library(randomForest)
 library(caret)
 library(xgboost)
 library(Matrix)
-library(glmnet)
+#library(glmnet)
 library(e1071)
 ```
 
