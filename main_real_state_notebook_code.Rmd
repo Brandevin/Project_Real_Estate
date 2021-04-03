@@ -6,8 +6,8 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE,WARNING=F,message=F, results='hide',fig.align='center')
-#knitr::opts_chunk$set(echo = T,WARNING=F,message=F, results='hide',fig.align='center')
+#knitr::opts_chunk$set(echo = FALSE,WARNING=F,message=F, results='hide',fig.align='center')
+knitr::opts_chunk$set(echo = T,WARNING=F,message=F, results='hide',fig.align='center')
 
 library(plyr)
 library(data.table)
